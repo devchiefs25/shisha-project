@@ -68,7 +68,7 @@ export const metadata: Metadata = {
     site: "@alsahra.shisha",
     creator: "@alsahra.shisha",
     title: "Al Sahra Shisha Delivery — Melbourne",
-    description: "Premium shisha delivered. Fresh heads, premium flavours, all Melbournetest.",
+    description: "Premium shisha delivered. Fresh heads, premium flavours, all Melbourne.",
     images: [
       {
         url: "/og-image.png",
