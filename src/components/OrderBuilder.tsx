@@ -1,51 +1,24 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Flame, Apple, Sparkles, Truck } from "lucide-react";
-
-type Base = { name: string; price: number; desc: string };
-type Head = { name: string; price: number };
-type Addon = { name: string; price: number };
-
-const BASES: Base[] = [
-  { name: "Standard Shisha", price: 55, desc: "One flavour, clay head" },
-  { name: "Premium (Adalya)", price: 60, desc: "Signature premium line" },
-  { name: "Mixed (up to 3)", price: 65, desc: "Custom flavour blend" },
-];
-
-const FLAVOURS: Record<string, string[]> = {
-  "Al Fakher": ["Apple", "Apple Mint", "Gum", "Gum Mint", "Mint", "Grape", "Grape Mint", "Blueberry", "Blueberry Mint", "Orange", "Orange Mint", "Lemon Mint", "Peach", "Strawberry", "Watermelon Mint", "Lucid Dreams", "Magic Love"],
-  "Adalya": ["Love 66", "Shiekh Money", "Lady Killer", "Joker 777"],
-  "Afzal": ["Pan Raas", "Chief Commissioner", "Brain Freezer", "Natural Spring Water", "Pan Kiwi Mint"],
-  "Nakhla": ["Double Apple"],
-};
-
-const HEADS: Head[] = [
-  { name: "Clay Head (included)", price: 0 },
-  { name: "Apple Fresh Head", price: 5 },
-  { name: "Orange Fresh Head", price: 15 },
-  { name: "Grapefruit Fresh Head", price: 15 },
-  { name: "Pineapple Fresh Head", price: 30 },
-];
-
-const ADDONS: Addon[] = [
-  { name: "Extra Coal (3 pcs)", price: 3 },
-  { name: "Extra Mouth Piece", price: 1 },
-  { name: "Extra Hose", price: 4 },
-  { name: "V Energy", price: 4.5 },
-  { name: "Red Bull", price: 4.5 },
-];
+import { Check, ChevronLeft, ChevronRight, Flame, Apple, Sparkles, Truck, Loader2 } from "lucide-react";
+import { useMutation } from "convex/react";
+import { toast } from "sonner";
+import { api } from "../../convex/_generated/api";
+import { ADDONS, BASES, FLAVOURS, HEADS, type Base, type Head } from "@/lib/catalog";
 
 const STEPS = ["Base", "Flavours", "Head", "Add-ons", "Delivery"] as const;
 
 export function OrderBuilder() {
+  const createOrder = useMutation(api.orders.createOrder);
   const [step, setStep] = useState(0);
   const [base, setBase] = useState<Base>(BASES[0]);
   const [flavours, setFlavours] = useState<string[]>([]);
   const [head, setHead] = useState<Head>(HEADS[0]);
   const [addons, setAddons] = useState<Record<string, number>>({});
   const [details, setDetails] = useState({ name: "", phone: "", address: "", time: "", notes: "" });
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState<{ orderId: string; total: number } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const maxFlavours = base.name.startsWith("Mixed") ? 3 : 1;
 
@@ -77,7 +50,47 @@ export function OrderBuilder() {
     return true;
   };
 
+  const handleSubmit = async () => {
+    if (!canNext() || isSubmitting) return;
+
+    const deliveryTimeMs = new Date(details.time).getTime();
+    if (!Number.isFinite(deliveryTimeMs)) {
+      toast.error("Please pick a valid delivery time");
+      return;
+    }
+
+    const addonsArr = Object.entries(addons).map(([name, qty]) => {
+      const a = ADDONS.find((x) => x.name === name);
+      return { name, price: a?.price ?? 0, qty };
+    });
+
+    setIsSubmitting(true);
+    try {
+      const result = await createOrder({
+        base: { name: base.name, price: base.price, desc: base.desc },
+        flavours,
+        head: { name: head.name, price: head.price },
+        addons: addonsArr,
+        customer: {
+          name: details.name.trim(),
+          phone: details.phone.trim(),
+          address: details.address.trim(),
+          deliveryTime: deliveryTimeMs,
+          notes: details.notes.trim() || undefined,
+        },
+      });
+      setSubmitted({ orderId: result.orderId, total: result.total });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not place order. Please try again.";
+      toast.error(message.replace(/^\[CONVEX[^\]]*\]\s*/, ""));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   if (submitted) {
+    const shortId = submitted.orderId.slice(-6).toUpperCase();
     return (
       <section id="order" className="container mx-auto px-6 py-24">
         <div className="max-w-xl mx-auto text-center rounded-3xl border border-gold/50 bg-card/80 backdrop-blur p-12 shadow-gold animate-float-up">
@@ -87,9 +100,16 @@ export function OrderBuilder() {
           <h2 className="text-4xl font-display text-gradient-gold mb-3">Order Placed</h2>
           <p className="text-muted-foreground mb-2">Thank you, {details.name}.</p>
           <p className="text-muted-foreground">A rider is being dispatched to {details.address} for {details.time}.</p>
-          <p className="mt-6 text-2xl font-display text-gold">Total: ${total.toFixed(2)}</p>
+          <p className="mt-6 text-2xl font-display text-gold">Total: ${submitted.total.toFixed(2)}</p>
+          <p className="mt-2 text-xs tracking-[0.3em] text-muted-foreground">REF #{shortId}</p>
           <button
-            onClick={() => { setSubmitted(false); setStep(0); setFlavours([]); setAddons({}); }}
+            onClick={() => {
+              setSubmitted(null);
+              setStep(0);
+              setFlavours([]);
+              setAddons({});
+              setDetails({ name: "", phone: "", address: "", time: "", notes: "" });
+            }}
             className="mt-8 rounded-full border border-gold/40 px-6 py-2.5 text-sm text-gold hover:bg-gold/10 transition"
           >
             Build another
@@ -246,7 +266,7 @@ export function OrderBuilder() {
         <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-border bg-card/60 backdrop-blur p-4 px-6">
           <button
             onClick={() => setStep((s) => Math.max(0, s - 1))}
-            disabled={step === 0}
+            disabled={step === 0 || isSubmitting}
             className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-gold disabled:opacity-30 disabled:hover:text-muted-foreground transition"
           >
             <ChevronLeft className="h-4 w-4" /> Back
@@ -265,11 +285,12 @@ export function OrderBuilder() {
             </button>
           ) : (
             <button
-              onClick={() => canNext() && setSubmitted(true)}
-              disabled={!canNext()}
-              className="rounded-full bg-gold-gradient px-6 py-2.5 text-sm font-medium text-primary-foreground shadow-gold disabled:opacity-40 hover:scale-[1.03] transition-transform"
+              onClick={handleSubmit}
+              disabled={!canNext() || isSubmitting}
+              className="inline-flex items-center gap-2 rounded-full bg-gold-gradient px-6 py-2.5 text-sm font-medium text-primary-foreground shadow-gold disabled:opacity-40 hover:scale-[1.03] transition-transform"
             >
-              Place Order
+              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              {isSubmitting ? "Placing..." : "Place Order"}
             </button>
           )}
         </div>
